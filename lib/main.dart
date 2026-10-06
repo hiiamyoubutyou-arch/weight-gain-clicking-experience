@@ -38,6 +38,8 @@ class WeightGainGameScreen extends StatefulWidget {
 
 class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   static const String _storageKey = 'weight_gain_save';
+  static const int _boostCost = 100;
+  static const int _boostDurationSeconds = 15;
 
   int _weight = 150;
   int _cash = 0;
@@ -45,6 +47,13 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   int _autoGain = 0;
   int _level = 1;
   bool _isLoading = true;
+
+  bool _boostActive = false;
+  DateTime? _boostEndsAt;
+  int _combo = 0;
+  DateTime? _lastTapTime;
+  Timer? _saveTimer;
+  bool _savePending = false;
 
   String _currentSkin = 'Alt Skin skin';
   final List<String> _availableSkins = [
@@ -139,26 +148,34 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   void initState() {
     super.initState();
     _initializeSkinSettings();
-    
+
     _gameTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _updateBoostStatus();
+
       if (_autoGain > 0 && mounted) {
         setState(() {
-          int gain = _autoGain;
+          double gain = _autoGain.toDouble();
+          if (_boostActive) {
+            gain *= 2.0;
+          }
           if (_specialUpgrades['metabolism_boost']! > 0) {
-            gain = (gain * 1.5).toInt();
+            gain *= 1.5;
           }
           if (_specialUpgrades['glutton_blessing']! > 0) {
-            gain = gain * 3;
+            gain *= 3;
           }
-          _weight += gain;
-          _cash += gain;
-          _totalLifetimeWeight += gain;
+
+          final gainInt = gain.round();
+          _weight += gainInt;
+          _cash += gainInt;
+          _totalLifetimeWeight += gainInt;
           _updateLevel();
           _checkAchievements();
         });
-        _saveProgress();
+        _markSaveDirty();
       }
     });
+
     _loadProgress();
   }
 
@@ -276,12 +293,37 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   }
 
   List<int> _generateStageWeights(int start, int end, int stages) {
-    List<int> weights = [];
+    final weights = <int>[];
     for (int i = 0; i < stages; i++) {
-      int weight = start + ((end - start) * i ~/ (stages - 1)).toInt();
+      final weight = start + ((end - start) * i ~/ (stages - 1)).toInt();
       weights.add(weight);
     }
     return weights;
+  }
+
+  double _getEffectiveMultiplier() {
+    final boostMultiplier = _boostActive ? 2.0 : 1.0;
+    final comboMultiplier = _combo > 0 ? 1.0 + ((_combo - 1) * 0.08) : 1.0;
+    return boostMultiplier * comboMultiplier;
+  }
+
+  void _updateBoostStatus() {
+    if (_boostActive && _boostEndsAt != null && DateTime.now().isAfter(_boostEndsAt!)) {
+      setState(() {
+        _boostActive = false;
+        _boostEndsAt = null;
+      });
+    }
+  }
+
+  void _markSaveDirty() {
+    _savePending = true;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 800), () async {
+      if (!_savePending) return;
+      _savePending = false;
+      await _saveProgress();
+    });
   }
 
   void _checkAchievements() {
@@ -370,25 +412,53 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   }
 
   void _gainWeight() {
+    _updateBoostStatus();
     setState(() {
       _totalTaps++;
-      int gain = _tapPower;
+
+      final now = DateTime.now();
+      if (_lastTapTime != null && now.difference(_lastTapTime!).inSeconds < 3) {
+        _combo++;
+      } else {
+        _combo = 1;
+      }
+      _lastTapTime = now;
+
+      double gain = _tapPower.toDouble() * _getEffectiveMultiplier();
       if (_specialUpgrades['mega_shake']! > 0) {
         gain *= 2;
       }
       if (_specialUpgrades['glutton_blessing']! > 0) {
         gain *= 3;
       }
-      _weight += gain;
-      _cash += gain;
-      _totalLifetimeWeight += gain;
+
+      final gainInt = gain.round();
+      _weight += gainInt;
+      _cash += gainInt;
+      _totalLifetimeWeight += gainInt;
       if (_weight > _maxWeightReached) {
         _maxWeightReached = _weight;
       }
       _updateLevel();
       _checkAchievements();
     });
-    _saveProgress();
+    _markSaveDirty();
+  }
+
+  void _activateBoost() {
+    if (_cash < _boostCost) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not enough gain points for a boost!'), duration: Duration(seconds: 1)),
+      );
+      return;
+    }
+
+    setState(() {
+      _cash -= _boostCost;
+      _boostActive = true;
+      _boostEndsAt = DateTime.now().add(const Duration(seconds: _boostDurationSeconds));
+    });
+    _markSaveDirty();
   }
 
   void _buyUpgrade(Upgrade upgrade) {
@@ -409,7 +479,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
         _showAchievementUnlocked('Buy your first upgrade!');
       }
     });
-    _saveProgress();
+    _markSaveDirty();
   }
 
   void _buySpecialUpgrade(SpecialUpgrade upgrade) {
@@ -434,7 +504,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
         _showAchievementUnlocked('Become a Mega Gainer!');
       }
     });
-    _saveProgress();
+    _markSaveDirty();
   }
 
   void _performRebirth() {
@@ -459,12 +529,13 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
                 _tapPower = 1;
                 _autoGain = 0;
                 _level = 1;
+                _combo = 0;
                 if (!_achievements['first_rebirth']!) {
                   _achievements['first_rebirth'] = true;
                 }
                 _updateLevel();
               });
-              _saveProgress();
+              _markSaveDirty();
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -490,15 +561,24 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
       _weight = _skinSettings[skin]?.stageWeights.first ?? 150;
       _updateLevel();
     });
-    _saveProgress();
+    _markSaveDirty();
   }
 
   String _getCurrentSkinImage() {
     final settings = _skinSettings[_currentSkin];
     if (settings == null) return '';
-    
+
     final stageNum = _level.clamp(1, settings.stageCount);
     return 'assets/skins/$_currentSkin/$stageNum.webp';
+  }
+
+  String _getBoostLabel() {
+    if (!_boostActive || _boostEndsAt == null) {
+      return 'Boost Burst ($_boostCost)';
+    }
+
+    final remaining = _boostEndsAt!.difference(DateTime.now()).inSeconds;
+    return 'Boost active: ${remaining > 0 ? remaining : 0}s';
   }
 
   int _getWeightForNextLevel() {
@@ -510,6 +590,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   @override
   void dispose() {
     _gameTimer.cancel();
+    _saveTimer?.cancel();
     super.dispose();
   }
 
@@ -566,6 +647,20 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
                   backgroundColor: Colors.purple,
                   foregroundColor: Colors.white,
                   textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: (_cash >= _boostCost && !_boostActive) ? _activateBoost : null,
+                icon: Icon(_boostActive ? Icons.timer : Icons.flash_on),
+                label: Text(_getBoostLabel()),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(0, 54),
+                  backgroundColor: _boostActive ? Colors.orange : Colors.deepPurple,
+                  foregroundColor: Colors.white,
                 ),
               ),
             ),
@@ -875,7 +970,8 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
             ),
           ),
           const SizedBox(height: 14),
-          Text('Tap power: $_tapPower  •  Auto gain: $_autoGain/sec', style: const TextStyle(fontSize: 16)),
+          Text('Tap power: $_tapPower • Auto gain: $_autoGain/sec', style: const TextStyle(fontSize: 16)),
+          Text('Combo: $_combo', style: TextStyle(fontSize: 14, color: Colors.amber[300])),
           const SizedBox(height: 8),
           if (!isMaxLevel)
             Text('Next stage: $weightUntilNext lbs away', style: TextStyle(fontSize: 14, color: Colors.amber[300]))
