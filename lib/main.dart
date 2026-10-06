@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -54,6 +55,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   DateTime? _lastTapTime;
   Timer? _saveTimer;
   bool _savePending = false;
+  String? _lastDailyBonusDate;
 
   String _currentSkin = 'Alt Skin skin';
   final List<String> _availableSkins = [
@@ -307,6 +309,10 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
     return boostMultiplier * comboMultiplier;
   }
 
+  String get _todayString => DateTime.now().toIso8601String().split('T').first;
+
+  bool get _canClaimDailyBonus => _lastDailyBonusDate != _todayString;
+
   void _updateBoostStatus() {
     if (_boostActive && _boostEndsAt != null && DateTime.now().isAfter(_boostEndsAt!)) {
       setState(() {
@@ -324,6 +330,41 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
       _savePending = false;
       await _saveProgress();
     });
+  }
+
+  void _triggerHaptic({required bool heavy}) {
+    if (heavy) {
+      HapticFeedback.heavyImpact();
+    } else {
+      HapticFeedback.selectionClick();
+    }
+  }
+
+  void _claimDailyBonus() {
+    if (!_canClaimDailyBonus) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Daily bonus already claimed today. Come back tomorrow!'), duration: Duration(seconds: 2)),
+      );
+      return;
+    }
+
+    final bonus = (25 + (_level * 15) + (_rebirths * 30)).clamp(50, 5000);
+
+    setState(() {
+      _cash += bonus;
+      _weight += (bonus / 2).round();
+      _lastDailyBonusDate = _todayString;
+    });
+
+    _triggerHaptic(heavy: true);
+    _markSaveDirty();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Daily bonus claimed: +$bonus gain points!'),
+        backgroundColor: Colors.green,
+      ),
+    );
   }
 
   void _checkAchievements() {
@@ -391,6 +432,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
           _specialUpgrades['metabolism_boost'] = int.tryParse(parts[10]) ?? 0;
           _specialUpgrades['glutton_blessing'] = int.tryParse(parts[11]) ?? 0;
           _totalTaps = int.tryParse(parts[12]) ?? 0;
+          _lastDailyBonusDate = parts.length > 13 ? parts[13] : null;
           _isLoading = false;
         });
         _updateLevel();
@@ -407,7 +449,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _storageKey,
-      '$_weight|$_cash|$_tapPower|$_autoGain|$_currentSkin|$_level|$_rebirths|$_totalLifetimeWeight|${_specialUpgrades['mega_shake']}|${_specialUpgrades['food_empire']}|${_specialUpgrades['metabolism_boost']}|${_specialUpgrades['glutton_blessing']}|$_totalTaps',
+      '$_weight|$_cash|$_tapPower|$_autoGain|$_currentSkin|$_level|$_rebirths|$_totalLifetimeWeight|${_specialUpgrades['mega_shake']}|${_specialUpgrades['food_empire']}|${_specialUpgrades['metabolism_boost']}|${_specialUpgrades['glutton_blessing']}|$_totalTaps|${_lastDailyBonusDate ?? ''}',
     );
   }
 
@@ -442,6 +484,8 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
       _updateLevel();
       _checkAchievements();
     });
+
+    _triggerHaptic(heavy: _combo >= 5);
     _markSaveDirty();
   }
 
@@ -458,6 +502,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
       _boostActive = true;
       _boostEndsAt = DateTime.now().add(const Duration(seconds: _boostDurationSeconds));
     });
+    _triggerHaptic(heavy: true);
     _markSaveDirty();
   }
 
@@ -479,6 +524,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
         _showAchievementUnlocked('Buy your first upgrade!');
       }
     });
+    _triggerHaptic(heavy: false);
     _markSaveDirty();
   }
 
@@ -504,6 +550,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
         _showAchievementUnlocked('Become a Mega Gainer!');
       }
     });
+    _triggerHaptic(heavy: true);
     _markSaveDirty();
   }
 
@@ -535,6 +582,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
                 }
                 _updateLevel();
               });
+              _triggerHaptic(heavy: true);
               _markSaveDirty();
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -561,6 +609,7 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
       _weight = _skinSettings[skin]?.stageWeights.first ?? 150;
       _updateLevel();
     });
+    _triggerHaptic(heavy: false);
     _markSaveDirty();
   }
 
@@ -570,15 +619,6 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
 
     final stageNum = _level.clamp(1, settings.stageCount);
     return 'assets/skins/$_currentSkin/$stageNum.webp';
-  }
-
-  String _getBoostLabel() {
-    if (!_boostActive || _boostEndsAt == null) {
-      return 'Boost Burst ($_boostCost)';
-    }
-
-    final remaining = _boostEndsAt!.difference(DateTime.now()).inSeconds;
-    return 'Boost active: ${remaining > 0 ? remaining : 0}s';
   }
 
   int _getWeightForNextLevel() {
@@ -835,6 +875,40 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const Text('Daily Bonus', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 12),
+                      Text(
+                        _canClaimDailyBonus
+                            ? 'Ready for a free bonus reward.'
+                            : 'Bonus claimed today. Come back tomorrow!',
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _canClaimDailyBonus ? _claimDailyBonus : null,
+                          icon: const Icon(Icons.card_giftcard),
+                          label: const Text('Claim Daily Bonus'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(0, 48),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                color: const Color(0xFF1F2937),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       const Text('Rebirth System', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
                       Text('Current Multiplier: ${_getMultiplier().toStringAsFixed(1)}x', style: const TextStyle(fontSize: 16, color: Colors.amber, fontWeight: FontWeight.bold)),
@@ -980,6 +1054,15 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
         ],
       ),
     );
+  }
+
+  String _getBoostLabel() {
+    if (!_boostActive || _boostEndsAt == null) {
+      return 'Boost Burst ($_boostCost)';
+    }
+
+    final remaining = _boostEndsAt!.difference(DateTime.now()).inSeconds;
+    return 'Boost active: ${remaining > 0 ? remaining : 0}s';
   }
 
   Widget _buildShop() {
