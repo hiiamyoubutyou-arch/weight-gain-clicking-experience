@@ -46,21 +46,21 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   int _level = 1;
   bool _isLoading = true;
 
-  String _currentSkin = 'Main Skin';
+  String _currentSkin = 'Alt Skin skin';
   final List<String> _availableSkins = [
-    'Main Skin',
     'Alt Skin skin',
-    'Beach skin',
-    'Camila Skin',
+    'Beach Skin',
+    'Camila skin',
     'Cat girl skin',
     'Chrismas skin',
-    'Eating skin',
+    'Eating Skin',
     'Endurance skin',
     'Extreme Weight Gain',
     'Few pounds skin',
     'Gym skin',
     'Kitagawa skin',
     'Komi skin',
+    'Main Skin',
     'Mercy skin',
     'Ramen skin',
     'Runner Blobfication skin',
@@ -164,26 +164,20 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
 
   void _initializeSkinSettings() {
     _skinSettings = {
-      'Main Skin': SkinSettings(
-        displayName: 'Main Skin',
-        stageCount: 20,
-        finalWeight: 1550,
-        stageWeights: _generateStageWeights(150, 1550, 20),
-      ),
       'Alt Skin skin': SkinSettings(
         displayName: 'Alt Skin skin',
         stageCount: 5,
         finalWeight: 900,
         stageWeights: _generateStageWeights(150, 900, 5),
       ),
-      'Beach skin': SkinSettings(
-        displayName: 'Beach skin',
+      'Beach Skin': SkinSettings(
+        displayName: 'Beach Skin',
         stageCount: 9,
         finalWeight: 740,
         stageWeights: _generateStageWeights(150, 740, 9),
       ),
-      'Camila Skin': SkinSettings(
-        displayName: 'Camila Skin',
+      'Camila skin': SkinSettings(
+        displayName: 'Camila skin',
         stageCount: 3,
         finalWeight: 1000,
         stageWeights: _generateStageWeights(150, 1000, 3),
@@ -200,8 +194,8 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
         finalWeight: 290,
         stageWeights: _generateStageWeights(150, 290, 13),
       ),
-      'Eating skin': SkinSettings(
-        displayName: 'Eating skin',
+      'Eating Skin': SkinSettings(
+        displayName: 'Eating Skin',
         stageCount: 10,
         finalWeight: 550,
         stageWeights: _generateStageWeights(150, 550, 10),
@@ -241,6 +235,12 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
         stageCount: 3,
         finalWeight: 375,
         stageWeights: _generateStageWeights(150, 375, 3),
+      ),
+      'Main Skin': SkinSettings(
+        displayName: 'Main Skin',
+        stageCount: 20,
+        finalWeight: 1550,
+        stageWeights: _generateStageWeights(150, 1550, 20),
       ),
       'Mercy skin': SkinSettings(
         displayName: 'Mercy skin',
@@ -494,7 +494,10 @@ class _WeightGainGameScreenState extends State<WeightGainGameScreen> {
   }
 
   String _getCurrentSkinImage() {
-    final stageNum = _level.clamp(1, _skinSettings[_currentSkin]?.stageCount ?? 20);
+    final settings = _skinSettings[_currentSkin];
+    if (settings == null) return '';
+    
+    final stageNum = _level.clamp(1, settings.stageCount);
     return 'assets/skins/$_currentSkin/$stageNum.webp';
   }
 
