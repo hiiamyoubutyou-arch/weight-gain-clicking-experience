@@ -1,0 +1,3 @@
+# This file configures the analyzer, which statically checks Flutter code.
+
+include: package:flutter_lints/flutter.yaml
